@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: otel-collector-spanmetrics
+    static_configs:
+      - targets: ["otel-collector:8889"]
+  - job_name: agenttrace-evaluator
+    static_configs:
+      - targets: ["host.docker.internal:9464"]

@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recursive Agent Tracing</title>
+<style>
+  :root{
+    --bg:       #ffffff;
+    --ink:      #0d0d0c;
+    --ink-soft: #5b5952;
+    --muted:    #9c9a92;
+    --line:     #e6e4dc;
+    --line-2:   #d3d1c7;
+    --dark:     #111111;
+    --red:      #c1352f;
+    --red-tint: #fdefed;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap{ max-width: 880px; margin: 0 auto; padding: 72px 24px 100px; }
+
+  header{ text-align:center; margin-bottom: 64px; }
+  h1.title{ font-size: 46px; font-weight: 700; letter-spacing:-0.02em; margin: 0 0 16px; }
+  .tagline{ font-size: 16px; color: var(--ink); margin: 0 0 8px; }
+  .subtitle{ font-size: 13px; color: var(--muted); margin: 0; }
+
+  section{ margin-top: 60px; }
+  section > h2{
+    font-size: 12px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); font-weight: 700; margin: 0 0 22px;
+  }
+
+  /* --- Section 1: Simulation --- */
+  .sliders{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-bottom: 30px; }
+  .slider-field label{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size: 13px; color: var(--ink-soft); margin-bottom: 12px;
+  }
+  .slider-field label .val{ font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  input[type=range]{
+    -webkit-appearance:none; appearance:none; width:100%; height:6px;
+    border-radius:999px; background: var(--line-2); outline:none; cursor:pointer; margin:0;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+    background: var(--dark); border:3px solid #fff; box-shadow:0 0 0 1px var(--line-2);
+    cursor:pointer;
+  }
+  input[type=range]::-moz-range-track{ height:6px; border-radius:999px; background:var(--line-2); }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%; background:var(--dark);
+    border:3px solid #fff; box-shadow:0 0 0 1px var(--line-2); cursor:pointer;
+  }
+
+  .control-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .pills{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pill{
+    font-family:inherit; font-size:12.5px; font-weight:600; padding:9px 16px;
+    border-radius:999px; border:1px solid var(--line-2); background:#fff; color:var(--ink-soft);
+    cursor:pointer; transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .pill:hover{ border-color: var(--ink); color: var(--ink); }
+  .pill.selected{ background: var(--dark); color:#fff; border-color: var(--dark); }
+
+  .run-btn{
+    font-family:inherit; font-size:13.5px; font-weight:700; padding:13px 30px;
+    border-radius:999px; background: var(--dark); color:#fff; border:none; cursor:pointer;
+    letter-spacing:.01em; transition: opacity .15s ease, transform .1s ease; flex: 0 0 auto;
+  }
+  .run-btn:hover:not(:disabled){ opacity:.82; }
+  .run-btn:active:not(:disabled){ transform: scale(0.97); }
+  .run-btn:disabled{ opacity:.45; cursor:default; }
+
+  /* --- Section 2: Pipeline --- */
+  .pipe-row{
+    display:grid; grid-template-columns: repeat(4, 1fr); gap:1px;
+    background: var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden;
+  }
+  .pipe-box{ background:#fff; padding:26px 16px; text-align:center; }
+  .pipe-box.dark{ background: var(--dark); }
+  .pipe-num{ font-size:32px; font-weight:700; font-variant-numeric: tabular-nums; }
+  .pipe-box.dark .pipe-num{ color:#fff; }
+  .pipe-label{ font-size:12px; color: var(--ink-soft); margin-top:6px; }
+  .pipe-box.dark .pipe-label{ color:#c9c7c0; }
+
+  /* --- Section 3: Trace Tree --- */
+  .tree-wrap{
+    border:1px solid var(--line); border-radius:14px; padding:30px; overflow-x:auto; min-height:110px;
+  }
+  .tree-empty{ color: var(--muted); font-size:13.5px; text-align:center; padding:26px 0; }
+
+  .trace-banner{
+    display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    padding:12px 16px; margin-bottom:26px;
+    border:1px solid var(--line-2); border-radius:10px; background:#fafaf8;
+  }
+  .trace-banner .tb-left{ display:flex; align-items:center; gap:10px; min-width:0; }
+  .tb-dot{ width:8px; height:8px; border-radius:50%; background: var(--muted); flex:0 0 auto; }
+  .tb-dot.live{ background: var(--dark); animation: tbPulse 1s ease-in-out infinite; }
+  .tb-dot.done{ background: var(--dark); animation:none; }
+  @keyframes tbPulse{ 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
+  .tb-label{ font-size:12.5px; font-weight:700; color: var(--ink); white-space:nowrap; }
+  .tb-id{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:12px; color: var(--ink-soft); overflow:hidden; text-overflow:ellipsis;
+  }
+  .tb-count{ font-size:12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space:nowrap; flex:0 0 auto; }
+
+  .tnode-trace{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:9.5px; color: var(--muted); letter-spacing:.01em;
+  }
+  .tnode-box.root .tnode-trace{ color:#aeada6; }
+
+  .tnode, .tnode-branch{ transition: opacity .35s ease, transform .35s ease; }
+  .tnode-box{
+    display:inline-flex; flex-direction:column; gap:3px;
+    border:1px solid var(--line-2); border-radius:10px; padding:9px 15px;
+    font-size:12.5px; font-weight:600; color:var(--ink); background:#fff; white-space:nowrap;
+  }
+  .tnode-box.root{ background: var(--dark); color:#fff; border-color: var(--dark); }
+  .tnode-box.flagged{ border-color: var(--red); background: var(--red-tint); }
+  .tnode-flag{
+    font-size:9.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;
+    color: var(--red);
+  }
+  .tnode-children{
+    margin-left:28px; padding-left:22px; border-left:1px solid var(--line-2);
+    margin-top:14px; display:flex; flex-direction:column; gap:14px;
+  }
+  .tnode-branch{ position:relative; }
+  .tnode-branch::before{
+    content:''; position:absolute; left:-22px; top:18px; width:22px; height:1px; background: var(--line-2);
+  }
+
+  /* --- Section 4: Metrics --- */
+  .metric-row{ display:grid; grid-template-columns: repeat(4, 1fr); gap:24px; text-align:center; }
+  .metric-num{ font-size:28px; font-weight:700; font-variant-numeric: tabular-nums; }
+  .metric-label{ font-size:12px; color: var(--ink-soft); margin-top:6px; }
+
+  footer{ margin-top:72px; text-align:center; font-size:12px; color: var(--muted); }
+
+  @media (max-width: 680px){
+    .sliders, .pipe-row, .metric-row{ grid-template-columns: repeat(2, 1fr); }
+    h1.title{ font-size:36px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1 class="title">Recursive Agent Tracing</h1>
+    <p class="tagline">Watch a parent agent spawn subagents, propagate a trace, and catch a failure.</p>
+    <p class="subtitle">TypeScript-ported interactive demo of the Python/OpenTelemetry harness.</p>
+  </header>
+
+  <section id="simulation">
+    <h2>Simulation</h2>
+
+    <div class="sliders">
+      <div class="slider-field">
+        <label for="s-subagents">Subagents <span class="val" id="v-subagents">12</span></label>
+        <input type="range" id="s-subagents" min="2" max="24" value="12" step="1">
+      </div>
+      <div class="slider-field">
+        <label for="s-depth">Max Depth <span class="val" id="v-depth">3</span></label>
+        <input type="range" id="s-depth" min="1" max="5" value="3" step="1">
+      </div>
+      <div class="slider-field">
+        <label for="s-rate">Failure Rate <span class="val" id="v-rate">15%</span></label>
+        <input type="range" id="s-rate" min="0" max="60" value="15" step="5">
+      </div>
+    </div>
+
+    <div class="control-row">
+      <div class="pills" id="failure-pills">
+        <button class="pill selected" data-class="prompt_injection">Prompt Injection</button>
+        <button class="pill" data-class="tool_hallucination">Tool Hallucination</button>
+        <button class="pill" data-class="silent_tool_failure">Silent Tool Failure</button>
+        <button class="pill" data-class="orphaned_subagent">Orphaned Subagent</button>
+        <button class="pill" data-class="retry_storm">Retry Storm</button>
+      </div>
+      <button class="run-btn" id="run-btn">Run</button>
+    </div>
+  </section>
+
+  <section id="pipeline">
+    <h2>Pipeline</h2>
+    <div class="pipe-row">
+      <div class="pipe-box"><div class="pipe-num" id="pipe-parent">0</div><div class="pipe-label">Parent Spawned</div></div>
+      <div class="pipe-box"><div class="pipe-num" id="pipe-active">0</div><div class="pipe-label">Subagents Active</div></div>
+      <div class="pipe-box"><div class="pipe-num" id="pipe-spans">0</div><div class="pipe-label">Spans Collected</div></div>
+      <div class="pipe-box dark"><div class="pipe-num" id="pipe-failures">0</div><div class="pipe-label">Failures Detected</div></div>
+    </div>
+  </section>
+
+  <section id="trace-tree">
+    <h2>Trace Tree</h2>
+    <div class="tree-wrap" id="tree-wrap">
+      <div class="tree-empty" id="tree-empty">Press Run to spawn a trace.</div>
+    </div>
+  </section>
+
+  <section id="metrics">
+    <h2>Metrics</h2>
+    <div class="metric-row">
+      <div class="metric"><div class="metric-num" id="m-spawned">—</div><div class="metric-label">Subagents Spawned</div></div>
+      <div class="metric"><div class="metric-num" id="m-spans">—</div><div class="metric-label">Spans Reconstructed</div></div>
+      <div class="metric"><div class="metric-num" id="m-coverage">—</div><div class="metric-label">Trace Coverage</div></div>
+      <div class="metric"><div class="metric-num" id="m-caught">—</div><div class="metric-label">Failures Caught</div></div>
+    </div>
+  </section>
+
+  <footer>All data on this page is simulated client-side — no backend, no network calls.</footer>
+
+</div>
+
+<script>
+(function(){
+  var FAILURE_LABELS = {
+    prompt_injection: "Prompt Injection",
+    tool_hallucination: "Tool Hallucination",
+    silent_tool_failure: "Silent Tool Failure",
+    orphaned_subagent: "Orphaned Subagent",
+    retry_storm: "Retry Storm"
+  };
+  var ROLES = ["researcher", "verifier", "analyst", "retriever"];
+
+  var subInput = document.getElementById("s-subagents");
+  var depthInput = document.getElementById("s-depth");
+  var rateInput = document.getElementById("s-rate");
+  var vSub = document.getElementById("v-subagents");
+  var vDepth = document.getElementById("v-depth");
+  var vRate = document.getElementById("v-rate");
+  var pills = Array.prototype.slice.call(document.querySelectorAll(".pill"));
+  var runBtn = document.getElementById("run-btn");
+  var treeWrap = document.getElementById("tree-wrap");
+  var treeEmpty = document.getElementById("tree-empty");
+
+  var pipeParentEl = document.getElementById("pipe-parent");
+  var pipeActiveEl = document.getElementById("pipe-active");
+  var pipeSpansEl = document.getElementById("pipe-spans");
+  var pipeFailuresEl = document.getElementById("pipe-failures");
+
+  var mSpawnedEl = document.getElementById("m-spawned");
+  var mSpansEl = document.getElementById("m-spans");
+  var mCoverageEl = document.getElementById("m-coverage");
+  var mCaughtEl = document.getElementById("m-caught");
+
+  var selectedClass = "prompt_injection";
+  var running = false;
+  var currentTraceId = "";
+
+  function randomHex(len){
+    var chars = "0123456789abcdef";
+    var s = "";
+    for (var i = 0; i < len; i++) s += chars[Math.floor(Math.random() * 16)];
+    return s;
+  }
+
+  subInput.addEventListener("input", function(){ vSub.textContent = subInput.value; });
+  depthInput.addEventListener("input", function(){ vDepth.textContent = depthInput.value; });
+  rateInput.addEventListener("input", function(){ vRate.textContent = rateInput.value + "%"; });
+
+  pills.forEach(function(p){
+    p.addEventListener("click", function(){
+      pills.forEach(function(x){ x.classList.remove("selected"); });
+      p.classList.add("selected");
+      selectedClass = p.dataset["class"];
+    });
+  });
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function intFmt(v){ return String(v); }
+  function pctFmt(v){ return v + "%"; }
+
+  function animateNumber(el, from, to, duration, fmt){
+    fmt = fmt || intFmt;
+    var start = null;
+    function step(ts){
+      if (start === null) start = ts;
+      var p = Math.min(1, (ts - start) / duration);
+      var val = Math.round(from + (to - from) * p);
+      el.textContent = fmt(val);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function buildTree(total, maxDepth, rate){
+    var root = { id: "root", label: "orchestrator", depth: 0, children: [], failed: false };
+    var order = [root];
+    var levels = [[root]];
+    var remaining = total;
+    var roleCounter = 0;
+
+    for (var d = 1; d <= maxDepth && remaining > 0; d++){
+      var isLast = d === maxDepth;
+      var levelCount = isLast ? remaining : Math.min(remaining, Math.max(1, Math.round(total / maxDepth)));
+      var parents = levels[d - 1];
+      var levelNodes = [];
+      for (var k = 0; k < levelCount; k++){
+        var parent = parents[k % parents.length];
+        var role = ROLES[roleCounter % ROLES.length];
+        roleCounter++;
+        var node = {
+          id: "n" + d + "_" + k,
+          label: role,
+          depth: d,
+          children: [],
+          failed: Math.random() < rate
+        };
+        parent.children.push(node);
+        levelNodes.push(node);
+        order.push(node);
+      }
+      levels.push(levelNodes);
+      remaining -= levelCount;
+    }
+    return { root: root, order: order };
+  }
+
+  function renderNode(node){
+    var wrap = document.createElement("div");
+    wrap.className = "tnode";
+
+    var box = document.createElement("div");
+    box.className = "tnode-box" + (node.depth === 0 ? " root" : "");
+    var labelText = node.depth === 0 ? "orchestrator (root)" : (node.label + " · depth " + node.depth);
+    box.innerHTML = "<span>" + escapeHtml(labelText) + "</span>" +
+      "<span class=\"tnode-trace\">trace " + escapeHtml(currentTraceId.slice(0, 8)) + "</span>";
+    wrap.appendChild(box);
+    node.boxEl = box;
+
+    if (node.children.length){
+      var childrenWrap = document.createElement("div");
+      childrenWrap.className = "tnode-children";
+      node.children.forEach(function(child){
+        var branch = document.createElement("div");
+        branch.className = "tnode-branch";
+        branch.style.opacity = "0";
+        branch.style.transform = "translateY(-4px)";
+        branch.appendChild(renderNode(child));
+        child.revealEl = branch;
+        childrenWrap.appendChild(branch);
+      });
+      wrap.appendChild(childrenWrap);
+    }
+    return wrap;
+  }
+
+  function revealNode(node){
+    if (node.revealEl){
+      node.revealEl.style.opacity = "1";
+      node.revealEl.style.transform = "none";
+    }
+  }
+
+  function resetPipeline(){
+    pipeParentEl.textContent = "0";
+    pipeActiveEl.textContent = "0";
+    pipeSpansEl.textContent = "0";
+    pipeFailuresEl.textContent = "0";
+  }
+
+  function resetMetrics(){
+    mSpawnedEl.textContent = "—";
+    mSpansEl.textContent = "—";
+    mCoverageEl.textContent = "—";
+    mCaughtEl.textContent = "—";
+  }
+
+  function startRun(){
+    if (running) return;
+    running = true;
+    runBtn.disabled = true;
+    runBtn.textContent = "Running…";
+
+    treeWrap.innerHTML = "";
+    resetPipeline();
+    resetMetrics();
+
+    currentTraceId = randomHex(32);
+
+    var total = parseInt(subInput.value, 10);
+    var maxDepth = parseInt(depthInput.value, 10);
+    var rate = parseInt(rateInput.value, 10) / 100;
+    var classKey = selectedClass;
+
+    var banner = document.createElement("div");
+    banner.className = "trace-banner";
+    banner.innerHTML =
+      '<div class="tb-left">' +
+        '<span class="tb-dot live" id="tb-dot"></span>' +
+        '<span class="tb-label">1 unified trace</span>' +
+        '<span class="tb-id">' + escapeHtml(currentTraceId) + '</span>' +
+      '</div>' +
+      '<span class="tb-count" id="tb-count">1 span so far</span>';
+    treeWrap.appendChild(banner);
+    var tbDot = banner.querySelector("#tb-dot");
+    var tbCount = banner.querySelector("#tb-count");
+
+    var built = buildTree(total, maxDepth, rate);
+    var root = built.root;
+    var order = built.order;
+
+    var rootEl = renderNode(root);
+    rootEl.style.opacity = "0";
+    rootEl.style.transform = "translateY(-4px)";
+    root.revealEl = rootEl;
+    treeWrap.appendChild(rootEl);
+
+    var spans = 0, active = 0, failures = 0, i = 0;
+
+    function step(){
+      if (i >= order.length){
+        finish();
+        return;
+      }
+      var node = order[i++];
+      revealNode(node);
+
+      if (node.depth === 0){
+        animateNumber(pipeParentEl, 0, 1, 200);
+        spans += 1;
+        animateNumber(pipeSpansEl, 0, spans, 200);
+        tbCount.textContent = spans + " span, same trace ID so far";
+      } else {
+        active++;
+        animateNumber(pipeActiveEl, active - 1, active, 220);
+        var add = 4 + Math.floor(Math.random() * 3);
+        spans += add;
+        animateNumber(pipeSpansEl, spans - add, spans, 260);
+        tbCount.textContent = spans + " spans, same trace ID so far";
+
+        if (node.failed){
+          setTimeout(function(){
+            node.boxEl.classList.add("flagged");
+            var tag = document.createElement("div");
+            tag.className = "tnode-flag";
+            tag.textContent = FAILURE_LABELS[classKey];
+            node.boxEl.appendChild(tag);
+            failures++;
+            animateNumber(pipeFailuresEl, failures - 1, failures, 220);
+          }, 220);
+        }
+      }
+      setTimeout(step, node.depth === 0 ? 280 : 140);
+    }
+
+    function finish(){
+      setTimeout(function(){
+        var coverage = (classKey === "orphaned_subagent" && failures > 0 && total > 0)
+          ? Math.max(80, Math.round(100 - (failures / total) * 35))
+          : 100;
+        animateNumber(mSpawnedEl, 0, total, 500);
+        animateNumber(mSpansEl, 0, spans, 600);
+        animateNumber(mCoverageEl, 0, coverage, 500, pctFmt);
+        animateNumber(mCaughtEl, 0, failures, 500);
+        tbDot.classList.remove("live");
+        tbDot.classList.add("done");
+        tbCount.textContent = spans + " spans reconstructed into 1 trace · " + coverage + "% coverage";
+        running = false;
+        runBtn.disabled = false;
+        runBtn.textContent = "Run";
+      }, 300);
+    }
+
+    step();
+  }
+
+  runBtn.addEventListener("click", startRun);
+})();
+</script>
+</body>
+</html>

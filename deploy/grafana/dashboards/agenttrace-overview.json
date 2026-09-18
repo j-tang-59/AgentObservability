@@ -1,0 +1,83 @@
+{
+  "title": "AgentTrace Overview",
+  "uid": "agenttrace-overview",
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Recent runs (invoke_workflow spans)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{ name =~ \"invoke_workflow .*\" }",
+          "tableType": "traces",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Spans / run (p50, p95)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(agenttrace_calls_total_bucket[5m])) by (le))",
+          "refId": "A",
+          "legendFormat": "p95 call latency"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Agents spawned, by depth",
+      "type": "barchart",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query": "{ name =~ \"invoke_agent .*\" } | select(agenttrace.agent.depth)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Findings by class (agenttrace_findings_total)",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(agenttrace_findings_total) by (failure_class, evaluator_type)",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Evaluation verdicts (gen_ai.evaluation.result, via Loki)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"agenttrace-evaluator\"} | json",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "schemaVersion": 39,
+  "version": 1
+}

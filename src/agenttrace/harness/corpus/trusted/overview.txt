@@ -1,0 +1,1 @@
+AgentTrace is a project that reconstructs recursive multi-agent runs into a single trace.

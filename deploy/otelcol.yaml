@@ -1,0 +1,60 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+connectors:
+  # Derive span metrics here OR via Tempo's metrics-generator, never both
+  # (D7) — we pick the Collector connector so Tempo stays purely a trace
+  # store. Never label by trace/run/spawn ID (D7); exemplars carry the
+  # trace-ID linkage instead.
+  spanmetrics:
+    namespace: agenttrace
+    dimensions:
+      - name: gen_ai.agent.name
+      - name: agenttrace.agent.role
+      - name: agenttrace.agent.depth
+    exemplars:
+      enabled: true
+    histogram:
+      explicit:
+        buckets: [10ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s]
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    enable_open_metrics: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo, spanmetrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+    metrics:
+      receivers: [spanmetrics]
+      processors: [batch]
+      exporters: [prometheus]
+  telemetry:
+    logs:
+      level: info
