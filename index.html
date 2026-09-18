@@ -58,6 +58,9 @@
     border:3px solid #fff; box-shadow:0 0 0 1px var(--line-2); cursor:pointer;
   }
 
+  .mode-row{ display:flex; align-items:center; gap:14px; margin-bottom:22px; flex-wrap:wrap; }
+  .mode-label{ font-size:13px; color:var(--ink-soft); font-weight:600; flex:0 0 auto; }
+
   .control-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
   .pills{ display:flex; gap:8px; flex-wrap:wrap; }
   .pill{
@@ -117,6 +120,33 @@
     font-size:9.5px; color: var(--muted); letter-spacing:.01em;
   }
   .tnode-box.root .tnode-trace{ color:#aeada6; }
+
+  .no-trace-banner{
+    display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    padding:12px 16px; margin-bottom:18px;
+    border:1px solid var(--red); border-radius:10px; background: var(--red-tint);
+  }
+  .no-trace-banner .tb-left{ display:flex; align-items:center; gap:10px; min-width:0; }
+  .no-trace-banner .tb-label{ color: var(--red); }
+  .no-trace-banner .tb-sub{ font-size:12px; color: var(--ink-soft); }
+  .no-trace-banner .tb-count{ color: var(--red); font-weight:700; }
+
+  .log-panel{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:12px; line-height:1.9; display:flex; flex-direction:column; gap:0;
+  }
+  .log-line{
+    opacity:0; transform:translateY(-3px); transition: opacity .3s ease, transform .3s ease;
+    white-space:nowrap; overflow-x:auto; padding:2px 0; border-bottom:1px dashed var(--line);
+  }
+  .log-line:last-child{ border-bottom:none; }
+  .log-line .lg-time{ color: var(--muted); }
+  .log-line .lg-pid{ color: var(--ink-soft); }
+  .log-line .lg-role{ color: var(--ink); font-weight:600; }
+  .log-line .lg-msg{ color: var(--ink-soft); }
+
+  .metrics-note{ font-size:12.5px; color: var(--ink-soft); margin: 16px 0 0; text-align:center; }
+  .metrics-note strong{ color: var(--red); }
 
   .tnode, .tnode-branch{ transition: opacity .35s ease, transform .35s ease; }
   .tnode-box{
@@ -179,6 +209,14 @@
       </div>
     </div>
 
+    <div class="mode-row">
+      <span class="mode-label">Instrumentation</span>
+      <div class="pills" id="mode-pills">
+        <button class="pill" data-mode="off">None · raw logs</button>
+        <button class="pill selected" data-mode="on">OpenTelemetry · unified trace</button>
+      </div>
+    </div>
+
     <div class="control-row">
       <div class="pills" id="failure-pills">
         <button class="pill selected" data-class="prompt_injection">Prompt Injection</button>
@@ -196,13 +234,13 @@
     <div class="pipe-row">
       <div class="pipe-box"><div class="pipe-num" id="pipe-parent">0</div><div class="pipe-label">Parent Spawned</div></div>
       <div class="pipe-box"><div class="pipe-num" id="pipe-active">0</div><div class="pipe-label">Subagents Active</div></div>
-      <div class="pipe-box"><div class="pipe-num" id="pipe-spans">0</div><div class="pipe-label">Spans Collected</div></div>
+      <div class="pipe-box"><div class="pipe-num" id="pipe-spans">0</div><div class="pipe-label" id="pipe-spans-label">Spans Collected</div></div>
       <div class="pipe-box dark"><div class="pipe-num" id="pipe-failures">0</div><div class="pipe-label">Failures Detected</div></div>
     </div>
   </section>
 
   <section id="trace-tree">
-    <h2>Trace Tree</h2>
+    <h2 id="tree-heading">Trace Tree</h2>
     <div class="tree-wrap" id="tree-wrap">
       <div class="tree-empty" id="tree-empty">Press Run to spawn a trace.</div>
     </div>
@@ -216,6 +254,7 @@
       <div class="metric"><div class="metric-num" id="m-coverage">—</div><div class="metric-label">Trace Coverage</div></div>
       <div class="metric"><div class="metric-num" id="m-caught">—</div><div class="metric-label">Failures Caught</div></div>
     </div>
+    <p class="metrics-note" id="metrics-note" hidden></p>
   </section>
 
   <footer>All data on this page is simulated client-side — no backend, no network calls.</footer>
@@ -239,22 +278,27 @@
   var vSub = document.getElementById("v-subagents");
   var vDepth = document.getElementById("v-depth");
   var vRate = document.getElementById("v-rate");
-  var pills = Array.prototype.slice.call(document.querySelectorAll(".pill"));
+  var pills = Array.prototype.slice.call(document.querySelectorAll("#failure-pills .pill"));
+  var modePills = Array.prototype.slice.call(document.querySelectorAll("#mode-pills .pill"));
   var runBtn = document.getElementById("run-btn");
   var treeWrap = document.getElementById("tree-wrap");
   var treeEmpty = document.getElementById("tree-empty");
+  var treeHeading = document.getElementById("tree-heading");
 
   var pipeParentEl = document.getElementById("pipe-parent");
   var pipeActiveEl = document.getElementById("pipe-active");
   var pipeSpansEl = document.getElementById("pipe-spans");
+  var pipeSpansLabelEl = document.getElementById("pipe-spans-label");
   var pipeFailuresEl = document.getElementById("pipe-failures");
 
   var mSpawnedEl = document.getElementById("m-spawned");
   var mSpansEl = document.getElementById("m-spans");
   var mCoverageEl = document.getElementById("m-coverage");
   var mCaughtEl = document.getElementById("m-caught");
+  var metricsNoteEl = document.getElementById("metrics-note");
 
   var selectedClass = "prompt_injection";
+  var instrumented = true;
   var running = false;
   var currentTraceId = "";
 
@@ -277,6 +321,16 @@
     });
   });
 
+  modePills.forEach(function(p){
+    p.addEventListener("click", function(){
+      modePills.forEach(function(x){ x.classList.remove("selected"); });
+      p.classList.add("selected");
+      instrumented = p.dataset["mode"] === "on";
+      pipeSpansLabelEl.textContent = instrumented ? "Spans Collected" : "Log Lines Printed";
+      treeHeading.textContent = instrumented ? "Trace Tree" : "Logs";
+    });
+  });
+
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
@@ -288,8 +342,18 @@
 
   function animateNumber(el, from, to, duration, fmt){
     fmt = fmt || intFmt;
+    // Pipeline counters get a new animateNumber call on the same element
+    // every ~140ms while a run is in flight, so an older call's rAF loop
+    // is often still active when a newer one starts. Without this token,
+    // whichever loop happens to render its LAST frame last wins — which
+    // isn't necessarily the most recent call — and the counter can settle
+    // on a stale, too-low value. Stamping+checking a per-element token
+    // makes only the latest call for a given element allowed to write.
+    var token = (el._animToken || 0) + 1;
+    el._animToken = token;
     var start = null;
     function step(ts){
+      if (el._animToken !== token) return;
       if (start === null) start = ts;
       var p = Math.min(1, (ts - start) / duration);
       var val = Math.round(from + (to - from) * p);
@@ -361,6 +425,20 @@
     return wrap;
   }
 
+  function renderLogLine(node){
+    var line = document.createElement("div");
+    line.className = "log-line";
+    var pid = randomHex(8);
+    var role = node.depth === 0 ? "orchestrator" : node.label;
+    var msg = node.depth === 0 ? "spawning subagents" : "completed";
+    line.innerHTML =
+      '<span class="lg-time">[' + new Date().toLocaleTimeString() + ']</span> ' +
+      '<span class="lg-pid">pid-' + pid + '</span> ' +
+      '<span class="lg-role">' + escapeHtml(role) + '</span> ' +
+      '<span class="lg-msg">' + escapeHtml(msg) + '</span>';
+    return line;
+  }
+
   function revealNode(node){
     if (node.revealEl){
       node.revealEl.style.opacity = "1";
@@ -391,6 +469,7 @@
     treeWrap.innerHTML = "";
     resetPipeline();
     resetMetrics();
+    metricsNoteEl.hidden = true;
 
     currentTraceId = randomHex(32);
 
@@ -398,29 +477,57 @@
     var maxDepth = parseInt(depthInput.value, 10);
     var rate = parseInt(rateInput.value, 10) / 100;
     var classKey = selectedClass;
-
-    var banner = document.createElement("div");
-    banner.className = "trace-banner";
-    banner.innerHTML =
-      '<div class="tb-left">' +
-        '<span class="tb-dot live" id="tb-dot"></span>' +
-        '<span class="tb-label">1 unified trace</span>' +
-        '<span class="tb-id">' + escapeHtml(currentTraceId) + '</span>' +
-      '</div>' +
-      '<span class="tb-count" id="tb-count">1 span so far</span>';
-    treeWrap.appendChild(banner);
-    var tbDot = banner.querySelector("#tb-dot");
-    var tbCount = banner.querySelector("#tb-count");
+    var mode = instrumented;
 
     var built = buildTree(total, maxDepth, rate);
     var root = built.root;
     var order = built.order;
 
-    var rootEl = renderNode(root);
-    rootEl.style.opacity = "0";
-    rootEl.style.transform = "translateY(-4px)";
-    root.revealEl = rootEl;
-    treeWrap.appendChild(rootEl);
+    var tbDot = null, tbCount;
+
+    if (mode){
+      var banner = document.createElement("div");
+      banner.className = "trace-banner";
+      banner.innerHTML =
+        '<div class="tb-left">' +
+          '<span class="tb-dot live" id="tb-dot"></span>' +
+          '<span class="tb-label">1 unified trace</span>' +
+          '<span class="tb-id">' + escapeHtml(currentTraceId) + '</span>' +
+        '</div>' +
+        '<span class="tb-count" id="tb-count">1 span so far</span>';
+      treeWrap.appendChild(banner);
+      tbDot = banner.querySelector("#tb-dot");
+      tbCount = banner.querySelector("#tb-count");
+
+      var rootEl = renderNode(root);
+      rootEl.style.opacity = "0";
+      rootEl.style.transform = "translateY(-4px)";
+      root.revealEl = rootEl;
+      treeWrap.appendChild(rootEl);
+    } else {
+      var noBanner = document.createElement("div");
+      noBanner.className = "no-trace-banner";
+      noBanner.innerHTML =
+        '<div class="tb-left">' +
+          '<span class="tb-label">✕ no shared trace ID</span>' +
+          '<span class="tb-sub">' + order.length + ' independent log streams, each with its own pid</span>' +
+        '</div>' +
+        '<span class="tb-count" id="tb-count">0% correlated</span>';
+      treeWrap.appendChild(noBanner);
+      tbCount = noBanner.querySelector("#tb-count");
+
+      var logPanel = document.createElement("div");
+      logPanel.className = "log-panel";
+      treeWrap.appendChild(logPanel);
+
+      order.forEach(function(node){
+        var line = renderLogLine(node);
+        line.style.opacity = "0";
+        line.style.transform = "translateY(-3px)";
+        node.revealEl = line;
+        logPanel.appendChild(line);
+      });
+    }
 
     var spans = 0, active = 0, failures = 0, i = 0;
 
@@ -436,16 +543,16 @@
         animateNumber(pipeParentEl, 0, 1, 200);
         spans += 1;
         animateNumber(pipeSpansEl, 0, spans, 200);
-        tbCount.textContent = spans + " span, same trace ID so far";
+        if (mode) tbCount.textContent = spans + " span, same trace ID so far";
       } else {
         active++;
         animateNumber(pipeActiveEl, active - 1, active, 220);
-        var add = 4 + Math.floor(Math.random() * 3);
+        var add = mode ? (4 + Math.floor(Math.random() * 3)) : 1;
         spans += add;
         animateNumber(pipeSpansEl, spans - add, spans, 260);
-        tbCount.textContent = spans + " spans, same trace ID so far";
 
-        if (node.failed){
+        if (node.failed && mode){
+          tbCount.textContent = spans + " spans, same trace ID so far";
           setTimeout(function(){
             node.boxEl.classList.add("flagged");
             var tag = document.createElement("div");
@@ -455,6 +562,10 @@
             failures++;
             animateNumber(pipeFailuresEl, failures - 1, failures, 220);
           }, 220);
+        } else if (node.failed && !mode){
+          failures++; // it happened — it just never surfaces anywhere without a trace
+        } else if (mode){
+          tbCount.textContent = spans + " spans, same trace ID so far";
         }
       }
       setTimeout(step, node.depth === 0 ? 280 : 140);
@@ -462,16 +573,30 @@
 
     function finish(){
       setTimeout(function(){
-        var coverage = (classKey === "orphaned_subagent" && failures > 0 && total > 0)
-          ? Math.max(80, Math.round(100 - (failures / total) * 35))
-          : 100;
+        var coverage, caught, spansShown;
+        if (mode){
+          coverage = (classKey === "orphaned_subagent" && failures > 0 && total > 0)
+            ? Math.max(80, Math.round(100 - (failures / total) * 35))
+            : 100;
+          caught = failures;
+          spansShown = spans;
+          tbDot.classList.remove("live");
+          tbDot.classList.add("done");
+          tbCount.textContent = spans + " spans reconstructed into 1 trace · " + coverage + "% coverage";
+        } else {
+          coverage = 0;
+          caught = 0;
+          spansShown = 0;
+          tbCount.textContent = "0% correlated";
+          metricsNoteEl.hidden = false;
+          metricsNoteEl.innerHTML = failures > 0
+            ? "<strong>" + failures + " failure" + (failures === 1 ? "" : "s") + "</strong> actually happened above — 0 were caught, because there's no trace to analyze."
+            : "No failures this run — but if there had been, there'd be no way to catch them without a trace.";
+        }
         animateNumber(mSpawnedEl, 0, total, 500);
-        animateNumber(mSpansEl, 0, spans, 600);
+        animateNumber(mSpansEl, 0, spansShown, 600);
         animateNumber(mCoverageEl, 0, coverage, 500, pctFmt);
-        animateNumber(mCaughtEl, 0, failures, 500);
-        tbDot.classList.remove("live");
-        tbDot.classList.add("done");
-        tbCount.textContent = spans + " spans reconstructed into 1 trace · " + coverage + "% coverage";
+        animateNumber(mCaughtEl, 0, caught, 500);
         running = false;
         runBtn.disabled = false;
         runBtn.textContent = "Run";
